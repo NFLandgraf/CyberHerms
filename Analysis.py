@@ -1,4 +1,12 @@
 #%% HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
+# Lets keep df as the main DataFrame, where the index is the frame number. 
+# If we calculate sth new (e.g. animal center, static_paw), there is the function fuse_dfs() to add new columns to the df. 
+# Whenever we work on/manipulate the df, lets do this with a df.copy(), so the df is untouched
+
+
+
+
+
 # IMPORT & DEFINE
 
 import pandas as pd
@@ -225,19 +233,19 @@ def plot_bodyparts(timewindow, df, spec_bodyparts, bodyparts, title):
 # DO STUFF
 
 # CLEAN the df into our format, add CENTER OF ANIMAL to df, add STATIC PAWS to df
-df = cleaning_raw_df(df)
-df = animal_center(df, 10)
-df, static_paw_timestamps = static_feet(df, 5, 5)
+main_df = cleaning_raw_df(df)
+main_df = animal_center(main_df, 10)
+main_df, static_paw_timestamps = static_feet(main_df, 5, 5)
 
 
 # get timestamps of CATWALK
-catwalk_timestamps = catwalk(df, 10, 0.15, 100)
+catwalk_timestamps = catwalk(main_df, 10, 0.15, 100)
 
 
 
 # PLOT
 # (list of [start, stop],   df,     special_bodyparts=['pos', 'feet', 'raw_feet'],      bodypart=[e.g. 'snout', 'mouth'],   title of plot)
-plot_bodyparts(catwalk_timestamps, df, ['pos', 'feet'], [], 'straight, fast and long Catwalks (animal center)')
+plot_bodyparts(catwalk_timestamps, main_df, ['pos', 'feet'], [], 'straight, fast and long Catwalks (animal center)')
 
 
 
