@@ -36,25 +36,46 @@ def fuse_dfs(df1, df2):
 
     return df1
 
-# you have a series with True/False in each row (depending on a previously established filter condition), return the start& stop frame of the [True onset, True offset]
-def timestamps_true_onoffsets(filter_cond, min_frame_nb):
+# you have a series with conditions (e.g. True/False or float/nan) in each row
+# return the start & stop frame of the [cond_onset, cond_offset]
+def timestamps_onsets(series, min_frame_nb, onset_cond=float):
     timestamp_list = []
     start_idx = None
     prev_idx = None
+    
+    # get on- and offset frames between switches between True & False
+    if onset_cond == True:
+        for idx, val in series.items():
+            if (val == onset_cond) and (start_idx == None):
+                start_idx = idx
+            
+            elif (val != onset_cond) and (start_idx != None):
+                if idx - start_idx >= min_frame_nb:
+                    timestamp_list.append([start_idx, prev_idx])
+                start_idx = None
+            prev_idx = idx
 
-    for idx, val in filter_cond.items():
-        if val and start_idx is None:
-            start_idx = idx
-        
-        elif not val and (start_idx is not None):
-            if idx - start_idx >= min_frame_nb:
-                timestamp_list.append([start_idx, prev_idx])
-            start_idx = None
-        prev_idx = idx
+        # for last value
+        if start_idx is not None:
+            if series.index[-1] - start_idx >= min_frame_nb:
+                timestamp_list.append([start_idx, series.index[-1]])
+    
+    # get on- and offset frames between switches between np.nan & float numbers
+    elif onset_cond == float:
+        for idx, val in series.items():
+            if not np.isnan(val) and (start_idx == None):
+                start_idx = idx
+            
+            elif np.isnan(val) and (start_idx is not None):
+                if idx - start_idx >= min_frame_nb:
+                    timestamp_list.append([start_idx, prev_idx])
+                start_idx = None
+            prev_idx = idx
 
-    if start_idx is not None:
-        if filter_cond.index[-1] - start_idx >= min_frame_nb:
-            timestamp_list.append([start_idx, filter_cond.index[-1]])
+        # for last value
+        if start_idx is not None:
+            if series.index[-1] - start_idx >= min_frame_nb:
+                timestamp_list.append([start_idx, series.index[-1]])
     
     return timestamp_list
 
@@ -133,7 +154,7 @@ def static_feet(df, min_paw_movement, min_static_frame_nb):
         # check in which frames the vector magnitude is below x
         vector_lengths = np.sqrt(paws_diff[x]**2 + paws_diff[y]**2)
         paw_is_static = vector_lengths <= min_paw_movement
-        static_paw_timestamps = timestamps_true_onoffsets(paw_is_static, min_static_frame_nb)
+        static_paw_timestamps = timestamps_onsets(paw_is_static, min_static_frame_nb, onset_cond=True)
     
         # creating a mask to change all values outside of timestamp-rows to nan, so that only static paw values exist
         mask = np.ones(len(df_feet), dtype=bool)
@@ -151,7 +172,7 @@ def static_feet(df, min_paw_movement, min_static_frame_nb):
     df_feet = df_feet.add_prefix('static_')
     df = fuse_dfs(df, df_feet.copy())
 
-    return df, static_paw_timestamps
+    return df
 
 
 
@@ -180,7 +201,7 @@ def catwalk(df, min_vector_lengh, max_angle_diff, min_catwalk_length):
     catwalk_filter = does_move & does_straight
     
     # get True on- and offset
-    catwalk_timestamps = timestamps_true_onoffsets(catwalk_filter, min_catwalk_length)
+    catwalk_timestamps = timestamps_onsets(catwalk_filter, min_catwalk_length, onset_cond=True)
 
     return catwalk_timestamps
 
@@ -199,7 +220,7 @@ def plot_bodyparts(timewindow, df, spec_bodyparts, bodyparts, title):
             # plot animal center via removing the nan values
             x = rows2plot['pos_x'][~np.isnan(rows2plot['pos_x'])]
             y = rows2plot['pos_y'][~np.isnan(rows2plot['pos_y'])]
-            plt.plot(x, y, label='center', c='grey')
+            plt.scatter(x, y, label='center', c='grey')
         
         if 'feet' in spec_bodyparts:
             # plot static feet
@@ -235,7 +256,7 @@ def plot_bodyparts(timewindow, df, spec_bodyparts, bodyparts, title):
 # CLEAN the df into our format, add CENTER OF ANIMAL to df, add STATIC PAWS to df
 main_df = cleaning_raw_df(df)
 main_df = animal_center(main_df, 10)
-main_df, static_paw_timestamps = static_feet(main_df, 5, 5)
+main_df = static_feet(main_df, 5, 5)
 
 
 # get timestamps of CATWALK
@@ -245,13 +266,92 @@ catwalk_timestamps = catwalk(main_df, 10, 0.15, 100)
 
 # PLOT
 # (list of [start, stop],   df,     special_bodyparts=['pos', 'feet', 'raw_feet'],      bodypart=[e.g. 'snout', 'mouth'],   title of plot)
-plot_bodyparts(catwalk_timestamps, main_df, ['pos', 'feet'], [], 'straight, fast and long Catwalks (animal center)')
+plot_bodyparts([catwalk_timestamps[3]], main_df, ['pos', 'feet'], [], 'straight, fast and long Catwalks (animal center)')
+
+
+#%% HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
+# StaticFeet_2_Midline_distance
+
+# now, lets focus on one static_paw first: 
+    # X Whenever there is a static_paw frame_window, take the coords of the animal_center that are in the static_paw frames
+    # X If there are less than 3 frames with animal_center coordinates in the static_paw frame_window, take the 3 animal_center coords closest to frame_window
+    # O create a best-fitting linear regression onto the >=3 animal_center coords
+    # O calculate the closest distance/perpendicular of static_paw to regression line and save in list
+
+
+# returns the index of the next float number while skipping NaNs (in either direction)
+def find_next_float_number(df, column, start_row, dir_higher=True):
+    column_number = df.columns.get_loc(column)
+    
+    # check the next float value towards higher rows
+    if dir_higher == True:
+        row_number = start_row + 1
+        while row_number < len(df):
+            value = df.iloc[row_number, column_number]
+            if not np.isnan(value):
+                return row_number
+            row_number += 1
+        return None
+    
+    # check the next float value towards lower rows
+    else:
+        row_number = start_row - 1
+        while row_number >= 0:
+            value = df.iloc[row_number, column_number]
+            if not np.isnan(value):
+                return row_number
+            row_number -= 1
+        return None
+
+# get index_list with >= 1 index values and add indices with column_floats above & below
+def add_higherlower_float_row(df, index_list, column):
+
+    low_row = df.index.get_loc(index_list[0])
+    lower_row = find_next_float_number(df, column, low_row, dir_higher=False)
+
+    high_row = df.index.get_loc(index_list[-1])
+    higher_row = find_next_float_number(df, column, high_row, dir_higher=True)
+    
+    index_list.append(lower_row)
+    index_list.append(higher_row)
+
+    return index_list
+
+
+# get distance from static paw to midline
+def staticpaw2midline_dist(df, static_window, midline):
+
+    # get all 'pos' float values (not nan) in the frame_window ad add index to list
+    pos_in_static = df.loc[static_window[0] : static_window[1], f'{midline}_x'].copy().dropna()
+    pos_in_static_idx = pos_in_static.index.tolist()
+
+
+    # if there are no pos_coords in the frames_window of static_feet, add a middle frame
+    if len(pos_in_static_idx) == 0:
+        pos_in_static_idx.append(int(np.mean(static_window)))
+
+    # if only 2 or less pos_coords, add one above and below until we have >= 3
+    while len(pos_in_static_idx) < 3:
+        pos_in_static_idx = add_higherlower_float_row(df, pos_in_static_idx, f'{midline}_x')
+
+    print(f'relevant_pos_frames: {pos_in_static_idx}')
+
+
+
+walk_window = catwalk_timestamps[0]
+print(f'walk_window: {walk_window}')
+
+# get a frame_window of all static_paws
+staticpaw_in_move = main_df.loc[walk_window[0] : walk_window[1], 'static_paw_VL_x']
+static_window = timestamps_onsets(staticpaw_in_move, 1, onset_cond=float)[0]
+print(f'static_paw_window: {static_window}')
+
+staticpaw2midline_dist(main_df, static_window, 'pos')
 
 
 
 
+# %%
 
-#%%
 
-# TEST
 
