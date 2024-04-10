@@ -241,13 +241,116 @@ def plot_bodyparts(timewindow, df, spec_bodyparts, bodyparts, title):
 
     plt.xlabel('X coordinate')
     plt.ylabel('Y coordinate')
-    #plt.legend()
+    plt.legend()
     plt.title(title)
     plt.show()
 
 
 
+# POINT TO MIDLINE DISTACE
+# take a list of indices (>= 1 index values) and add indices where there is a float in higher&lower row in certain column
+def add_float_of_higherlower_row(df, index_list, column):
+    column_number = df.columns.get_loc(column)
+    
+    # check the next float value towards lower rows
+    lower_row = None
+    low_row = df.index.get_loc(index_list[0])
+    row_number = low_row - 1
+    while row_number >= 0:
+        value = df.iloc[row_number, column_number]
+        if not np.isnan(value):
+            lower_row = row_number
+            break
+        row_number -= 1
 
+    # check the next float value towards higher rows
+    higher_row = None
+    high_row = df.index.get_loc(index_list[-1])
+    row_number = high_row + 1
+    while row_number < len(df):
+        value = df.iloc[row_number, column_number]
+        if not np.isnan(value):
+            higher_row = row_number
+            break
+        row_number += 1
+
+    if lower_row != None:
+        index_list.append(df.index[lower_row])
+    if higher_row != None:
+        index_list.append(df.index[higher_row])
+    
+    index_list.sort()
+
+    return index_list
+
+# takes point coords and regression line slope& intercept and returns perpendicular distance
+def point2line_dist(point, slope, intercept):
+    x, y = point
+    distance = abs(slope*x - y + intercept) / np.sqrt(slope**2 + 1)
+    return distance
+
+# takes a frame window and returns a regression line of the animal midline during window
+def internal_midline_in_window(df, frame_window, midline_column):
+    midcol_x, midcol_y = f'{midline_column}_x', f'{midline_column}_y'
+    start, end = frame_window
+
+    # get all 'pos' float values (not nan) in the frame_window and add index to list
+    pos_in_static = df.loc[start : end, midcol_x].copy().dropna()
+    pos_in_static_idx = pos_in_static.index.tolist()
+
+    # if there are no pos_coords in the frames_window of static_feet, add the mean static feet frame
+    if len(pos_in_static_idx) == 0:
+        pos_in_static_idx.append(int(np.mean(frame_window)))
+
+    # if only 2 or less pos_coords, add one above and below until we have >= 3
+    while len(pos_in_static_idx) < 3:
+        pos_in_static_idx = add_float_of_higherlower_row(df, pos_in_static_idx, midcol_x)
+
+    # get xy coords of relevant midline frames
+    pos_coords = df.loc[pos_in_static_idx, [midcol_x, midcol_y]].to_numpy()
+    
+    pos_coords = np.array([sublist for sublist in pos_coords if not any(np.isnan(x) for x in sublist)])
+
+    print(pos_coords)
+    print('\n')
+
+    # fit linear regression to coords
+    slope, intercept = np.polyfit(pos_coords[:, 0], pos_coords[:, 1], 1)
+
+    return pos_coords, slope, intercept
+
+# calculate distance from a point to straight midline
+# static point (e.g. static paw): window is start&end frame of static frames, point=window[0]
+# moving point (e.g. moving nose): 'window' is only 1 frame so window must be [frame, frame])
+def point2midline_dist(df, window, midline_column, point_column):
+    
+    # linear regression line
+    pos_coords, mid_slope, mid_intercept = internal_midline_in_window(df, window, midline_column)
+    point_coords = df.loc[window[0], [f'{point_column}_x', f'{point_column}_y']].to_numpy()
+
+    # point-midline distance
+    distance = point2line_dist(point_coords, mid_slope, mid_intercept)
+
+    #plot_point2midline(pos_coords, mid_slope, mid_intercept, point_coords, distance)
+    return distance
+
+
+def plot_point2midline(pos_coords, mid_slope, mid_intercept, point_coords, distance):
+    
+    pos_coords_x = [pos[0] for pos in pos_coords]
+    pos_coords_y = [pos[1] for pos in pos_coords]
+    plt.scatter(pos_coords_x, pos_coords_y, label='center')
+
+    regline_x = np.arange(0, x_pixel, 1)
+    regline_y = (mid_slope * regline_x) + mid_intercept
+    plt.plot(regline_x, regline_y, label='midline')
+
+    point_x, point_y = point_coords
+    plt.scatter(point_x, point_y, label='point')
+
+    plt.xlim(30, 470)
+    plt.ylim(45, 155)
+    plt.show()
 
 
 #%% HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
@@ -273,85 +376,46 @@ plot_bodyparts([catwalk_timestamps[3]], main_df, ['pos', 'feet'], [], 'straight,
 # StaticFeet_2_Midline_distance
 
 # now, lets focus on one static_paw first: 
-    # X Whenever there is a static_paw frame_window, take the coords of the animal_center that are in the static_paw frames
-    # X If there are less than 3 frames with animal_center coordinates in the static_paw frame_window, take the 3 animal_center coords closest to frame_window
-    # O create a best-fitting linear regression onto the >=3 animal_center coords
-    # O calculate the closest distance/perpendicular of static_paw to regression line and save in list
+# Whenever there is a static_paw frame_window, take the coords of the animal_center that are in the static_paw frames
+# X If there are less than 3 frames with animal_center coordinates in the static_paw frame_window, take the 3 animal_center coords closest to frame_window
+# X create a best-fitting linear regression onto the >=3 animal_center coords
+# X calculate the closest distance/perpendicular of static_paw to regression line and save in list
 
 
-# returns the index of the next float number while skipping NaNs (in either direction)
-def find_next_float_number(df, column, start_row, dir_higher=True):
-    column_number = df.columns.get_loc(column)
-    
-    # check the next float value towards higher rows
-    if dir_higher == True:
-        row_number = start_row + 1
-        while row_number < len(df):
-            value = df.iloc[row_number, column_number]
-            if not np.isnan(value):
-                return row_number
-            row_number += 1
-        return None
-    
-    # check the next float value towards lower rows
-    else:
-        row_number = start_row - 1
-        while row_number >= 0:
-            value = df.iloc[row_number, column_number]
-            if not np.isnan(value):
-                return row_number
-            row_number -= 1
-        return None
+all_dists = []
+paws = ['static_paw_VR', 'static_paw_VL', 'static_paw_HR', 'static_paw_HL']
+for paw in paws:
+    print('DDD')
+    dists = []
+    for walk_start, walk_end in catwalk_timestamps:
+        
+        # get a frame_window of all static_paws
+        staticpaw_in_window = main_df.loc[walk_start : walk_end, f'{paw}_x']
+        static_window = timestamps_onsets(staticpaw_in_window, 1, onset_cond=float)
 
-# get index_list with >= 1 index values and add indices with column_floats above & below
-def add_higherlower_float_row(df, index_list, column):
-
-    low_row = df.index.get_loc(index_list[0])
-    lower_row = find_next_float_number(df, column, low_row, dir_higher=False)
-
-    high_row = df.index.get_loc(index_list[-1])
-    higher_row = find_next_float_number(df, column, high_row, dir_higher=True)
-    
-    index_list.append(lower_row)
-    index_list.append(higher_row)
-
-    return index_list
+        for static_paw in static_window:
+            distance = point2midline_dist(main_df, static_paw, 'pos', paw)
+            dists.append(distance)
+    all_dists.append(dists)
 
 
-# get distance from static paw to midline
-def staticpaw2midline_dist(df, static_window, midline):
+print(all_dists)
 
-    # get all 'pos' float values (not nan) in the frame_window ad add index to list
-    pos_in_static = df.loc[static_window[0] : static_window[1], f'{midline}_x'].copy().dropna()
-    pos_in_static_idx = pos_in_static.index.tolist()
+front_paws = all_dists[0] + all_dists[1]
+hind_paws = all_dists[2] + all_dists[3]
+x_data = ['front', 'hind']
+y_data = [np.mean(front_paws), np.mean(hind_paws)]
 
+front_paws_std = np.std(front_paws)
+hind_paws_std = np.std(hind_paws)
+error = [front_paws_std, hind_paws_std]
 
-    # if there are no pos_coords in the frames_window of static_feet, add a middle frame
-    if len(pos_in_static_idx) == 0:
-        pos_in_static_idx.append(int(np.mean(static_window)))
-
-    # if only 2 or less pos_coords, add one above and below until we have >= 3
-    while len(pos_in_static_idx) < 3:
-        pos_in_static_idx = add_higherlower_float_row(df, pos_in_static_idx, f'{midline}_x')
-
-    print(f'relevant_pos_frames: {pos_in_static_idx}')
+plt.bar(x_data, y_data, yerr=error)
 
 
 
-walk_window = catwalk_timestamps[0]
-print(f'walk_window: {walk_window}')
-
-# get a frame_window of all static_paws
-staticpaw_in_move = main_df.loc[walk_window[0] : walk_window[1], 'static_paw_VL_x']
-static_window = timestamps_onsets(staticpaw_in_move, 1, onset_cond=float)[0]
-print(f'static_paw_window: {static_window}')
-
-staticpaw2midline_dist(main_df, static_window, 'pos')
-
-
-
+plt.show()
 
 # %%
-
 
 
