@@ -8,14 +8,19 @@ import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.stats import linregress
+import os
      
-main_df = pd.read_csv('data\\2m_292_crop.csv', header=None, low_memory=False)
+path = 'C:\\Users\\landgrafn\\Desktop\\2m_analysis'
+common_name = '2m.csv'
 
 x_pixel, y_pixel = 570, 570
-arena_length = 400 #mm
+arena_length = 400          # in mm
 px_per_mm = np.mean([x_pixel, y_pixel]) / arena_length
 fps = 100
+
 all_bodyparts = ['snout', 'mouth', 'paw_VL','paw_VR', 'middle', 'paw_HL', 'paw_HR','anus', 'tail_start', 'tail_middle', 'tail_end']
+center_bodyparts = ['middle', 'anus', 'tail_start']
+paws = ['paw_VL', 'paw_VR', 'paw_HL', 'paw_HR']
 colors = ['b', 'g', 'r', 'c', 'm', 'y']
 
 
@@ -23,166 +28,41 @@ colors = ['b', 'g', 'r', 'c', 'm', 'y']
 #%% HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 # FUNCTIONS
 
-def euclidian_dist(point1x, point1y, point2x, point2y, px_per_mm):
+# basic functions
+
+def get_files(path):
+    # get files
+    files = [file for file in os.listdir(path) 
+                if os.path.isfile(os.path.join(path, file)) and
+                common_name in file]
+    print(f'{len(files)} files found\n')
+
+    return files
+
+def euclidian_dist(point1x, point1y, point2x, point2y):
     # calculates the euclidian distance between 2 bps in mm
-    distance = (np.sqrt((point1x - point2x) ** 2 + (point1y - point2y) ** 2)) / px_per_mm
-    return distance
+    distance_mm = (np.sqrt((point1x - point2x) ** 2 + (point1y - point2y) ** 2)) / px_per_mm
+    
+    return distance_mm
 
-
-def point2line_dist(slope, intercept, point_x, point_y, px_per_mm):
-    # returns the shortest distance between a line (fiven slope and intercept) and a xy point
+def point2line_dist(slope, intercept, point_x, point_y):
+    # returns the shortest distance between a line (given slope and intercept) and a xy point
     A, B, C = slope, -1, intercept
     distance = (abs(A*point_x + B*point_y + C) / np.sqrt(A**2 + B**2)) / px_per_mm
+
     return distance
 
-
 def fuse_dfs(df1, df2):
-    # FUSE 2 dfs
-    # reindex df2 to the index of df1 (important if you have nan gaps)
+    # FUSE 2 dfs by reindexing df2 to the index of df1 (important if you have nan gaps)
     df2 = df2.reindex(df1.index)
     df1 = df1.join(df2)
 
     return df1
 
-
-def cleaning_raw_df(df):
-    # CLEAN UP raw data frame, nan if likelihood < x, ints&floats insead of strings
-    # combines the string of the two rows to create new header
-    new_columns = [f"{col[0]}_{col[1]}" for col in zip(df.iloc[1], df.iloc[2])]     # df.iloc[0] takes all values of first row
-    df.columns = new_columns
-    df = df.drop(labels=[0, 1, 2], axis="index")
-
-    # adapt index
-    df.set_index('bodyparts_coords', inplace=True)
-    df.index.names = ['frames']
-
-    # turn all the prior string values into floats and index into int
-    df = df.astype(float)
-    df.index = df.index.astype(int)
-    
-    # flip the video along the x axis
-    for column in df.columns:
-        if '_y' in column:
-            df[column] = y_pixel - df[column] 
-
-    # whereever _likelihood <= x, change _x & _y to nan
-    for bodypart in all_bodyparts:
-        filter = df[f'{bodypart}_likelihood'] <= 0.9
-        df.loc[filter, f'{bodypart}_x'] = np.nan
-        df.loc[filter, f'{bodypart}_y'] = np.nan
-        df = df.drop(labels=f'{bodypart}_likelihood', axis="columns")
-    
-    # add a gaussian filter over the df to reduce outlayers
-    df = df.rolling(window=100, win_type='gaussian', min_periods=1, center=True).mean(std=1)
-
-    return df
-
-
-def find_straight_line_segments(x, y, straight_threshold, duration=100):
-    
-    segments = []
-    start_idx = 0
-    end_idx = 2
-
-    while end_idx <= len(x):
-        # Fit a line to the points
-        slope, intercept, r_value, p_value, std_err = linregress(x[start_idx:end_idx], y[start_idx:end_idx])
-
-        # Check if R-squared value exceeds the threshold
-        if r_value**2 >= straight_threshold:
-            end_idx += 1
-
-        elif r_value**2 < straight_threshold:
-            if end_idx - start_idx >= duration:
-                segments.append((start_idx, end_idx - 1))
-                start_idx = end_idx
-                end_idx += 2
-            else:
-                start_idx = end_idx
-                end_idx += 2
-
-    # If the last segment continues till the end of the series
-    if end_idx-1 == len(x) and end_idx - start_idx >= duration:
-        segments.append((start_idx, end_idx-1))
-
-    return segments
-
-
-def point2centerline_dist(df, point, centerline_bps):
-
-    # get all 'pos' float values (not nan) in the frame_window ad add index to list
-    pos_in_static = df.loc[static_window[0] : static_window[1], f'{midline}_x'].copy().dropna()
-    pos_in_static_idx = pos_in_static.index.tolist()
-
-
-    # if there are no pos_coords in the frames_window of static_feet, add a middle frame
-    if len(pos_in_static_idx) == 0:
-        pos_in_static_idx.append(int(np.mean(static_window)))
-
-    # if only 2 or less pos_coords, add one above and below until we have >= 3
-    while len(pos_in_static_idx) < 3:
-        pos_in_static_idx = add_higherlower_float_row(df, pos_in_static_idx, f'{midline}_x')
-
-    print(f'relevant_pos_frames: {pos_in_static_idx}')
-
-
-
-def add_basic_columns_to_df(df, frames_shifted, px_per_mm):
-
-    new_df = pd.DataFrame()
-
-    center_bodyparts = ['middle', 'anus', 'tail_start']
-    center_bodyparts_x = [f'{bodypart}_x' for bodypart in center_bodyparts]
-    center_bodyparts_y = [f'{bodypart}_y' for bodypart in center_bodyparts]
-    
-    # create time series for center that is represented by the mean of stable bodyparts
-    # choose bodyparts that are always tracked
-    new_df['center_x'] = df[center_bodyparts_x].mean(axis="columns")
-    new_df['center_y'] = df[center_bodyparts_y].mean(axis="columns")
-
-    # add shifted center columns to df
-    new_df['center_x_shifted'] = new_df['center_x'].shift(periods=frames_shifted)
-    new_df['center_y_shifted'] = new_df['center_y'].shift(periods=frames_shifted)
-
-    # add distances beetween bps    
-    new_df['dist_H_paws'] = euclidian_dist(df['paw_HL_x'].values, df['paw_HL_y'].values, df['paw_HR_x'].values, df['paw_HR_y'].values, px_per_mm)
-    new_df['dist_V_paws'] = euclidian_dist(df['paw_VL_x'].values, df['paw_VL_y'].values, df['paw_VR_x'].values, df['paw_VR_y'].values, px_per_mm)
-    new_df['dist_L_paws'] = euclidian_dist(df['paw_HL_x'].values, df['paw_HL_y'].values, df['paw_VL_x'].values, df['paw_VL_y'].values, px_per_mm)
-    new_df['dist_R_paws'] = euclidian_dist(df['paw_HR_x'].values, df['paw_HR_y'].values, df['paw_VR_x'].values, df['paw_VR_y'].values, px_per_mm)
-    
-    # takes bps that would represent an intrinsic centerline, calculates linear regression line for each row and adds columns for slope and intercept
-    # takes nan if less than 2 bps without nan
-    def linear_fit(row, x_headers, y_headers):
-        # fits a linear regression line to the column values provided and returns the coefficients
-        x = row.loc[x_headers]
-        y = row.loc[y_headers]
-
-        if np.sum(~np.isnan(x)) < 2:
-            return (np.nan, np.nan)
-        
-        try:
-            coeffs = np.polyfit(x, y, 1)
-            return coeffs
-        except:
-            return (np.nan, np.nan)
-    new_df[['centerline_slopes', 'centerline_intercepts']] = df.apply(linear_fit, args=(center_bodyparts_x, center_bodyparts_y), axis=1, result_type='expand')
-    
-    # adds distances between bps and centerline to new_df
-    new_df['dist_HL2centerline'] = point2line_dist(new_df['centerline_slopes'], new_df['centerline_intercepts'], df['paw_HL_x'].values, df['paw_HL_y'].values, px_per_mm)
-    new_df['dist_HR2centerline'] = point2line_dist(new_df['centerline_slopes'], new_df['centerline_intercepts'], df['paw_HR_x'].values, df['paw_HR_y'].values, px_per_mm)
-    new_df['dist_VL2centerline'] = point2line_dist(new_df['centerline_slopes'], new_df['centerline_intercepts'], df['paw_VL_x'].values, df['paw_VL_y'].values, px_per_mm)
-    new_df['dist_VR2centerline'] = point2line_dist(new_df['centerline_slopes'], new_df['centerline_intercepts'], df['paw_VR_x'].values, df['paw_VR_y'].values, px_per_mm)
-    
-    # add df_center to df
-    df = fuse_dfs(df, new_df)
-
-    return df
-
-
-
 def timestamps_onsets(series, min_frame_nb, onset_cond=float):
     # you have a series with conditions (e.g. True/False or float/nan) in each row
     # return the start & stop frame of the [cond_onset, cond_offset]
+    
     timestamp_list = []
     start_idx = None
     prev_idx = None
@@ -224,24 +104,122 @@ def timestamps_onsets(series, min_frame_nb, onset_cond=float):
     return timestamp_list
 
 
-def static_feet(df, min_paw_movement, min_static_frame_nb):
+# specific functions
+def cleaning_raw_df(df, nan_threshold=0.9):
+    # CLEAN UP raw data frame, nan if likelihood < x, ints&floats insead of strings
+    # combines the string of the two rows to create new header
+    print('cleaning_raw_df')
+
+    new_columns = [f"{col[0]}_{col[1]}" for col in zip(df.iloc[1], df.iloc[2])]     # df.iloc[0] takes all values of first row
+    df.columns = new_columns
+    df = df.drop(labels=[0, 1, 2], axis="index")
+
+    # adapt index
+    df.set_index('bodyparts_coords', inplace=True)
+    df.index.names = ['frames']
+
+    # turn all the prior string values into floats and index into int
+    df = df.astype(float)
+    df.index = df.index.astype(int)
+    
+    # flip the video along the x axis
+    for column in df.columns:
+        if '_y' in column:
+            df[column] = y_pixel - df[column] 
+
+    # whereever _likelihood <= x, change _x & _y to nan
+    for bodypart in all_bodyparts:
+        filter = df[f'{bodypart}_likelihood'] <= nan_threshold
+        df.loc[filter, f'{bodypart}_x'] = np.nan
+        df.loc[filter, f'{bodypart}_y'] = np.nan
+        df = df.drop(labels=f'{bodypart}_likelihood', axis="columns")
+    
+    # add a gaussian filter over the df to reduce outlayers
+    df = df.rolling(window=100, win_type='gaussian', min_periods=1, center=True).mean(std=1)
+
+    return df
+
+def add_basic_columns_to_df(df, duration_shifted_s=0.1):
+    # calculating relatively simple things to add to df
+    print('add_basic_columns_to_df')
+
+    frames_shifted = int(duration_shifted_s * fps)
+    new_df = pd.DataFrame()
+
+    center_bodyparts_x = [f'{bodypart}_x' for bodypart in center_bodyparts]
+    center_bodyparts_y = [f'{bodypart}_y' for bodypart in center_bodyparts]
+    
+    # create time series for center that is represented by the mean of stable bodyparts
+    # choose bodyparts that are always tracked
+    new_df['center_x'] = df[center_bodyparts_x].mean(axis="columns")
+    new_df['center_y'] = df[center_bodyparts_y].mean(axis="columns")
+
+    # add shifted center columns to df
+    new_df['center_x_shifted'] = new_df['center_x'].shift(periods=frames_shifted)
+    new_df['center_y_shifted'] = new_df['center_y'].shift(periods=frames_shifted)
+
+    # add distances beetween bps    
+    new_df['dist_H_paws'] = euclidian_dist(df['paw_HL_x'].values, df['paw_HL_y'].values, df['paw_HR_x'].values, df['paw_HR_y'].values)
+    new_df['dist_V_paws'] = euclidian_dist(df['paw_VL_x'].values, df['paw_VL_y'].values, df['paw_VR_x'].values, df['paw_VR_y'].values)
+    new_df['dist_L_paws'] = euclidian_dist(df['paw_HL_x'].values, df['paw_HL_y'].values, df['paw_VL_x'].values, df['paw_VL_y'].values)
+    new_df['dist_R_paws'] = euclidian_dist(df['paw_HR_x'].values, df['paw_HR_y'].values, df['paw_VR_x'].values, df['paw_VR_y'].values)
+    
+    # takes bps that would represent an intrinsic centerline, calculates linear regression line for each row and adds columns for slope and intercept
+    # takes nan if less than 2 bps without nan
+    def linear_fit(row, x_headers, y_headers):
+        # fits a linear regression line to the column values provided and returns the coefficients
+        x = row.loc[x_headers]
+        y = row.loc[y_headers]
+
+        if np.sum(~np.isnan(x)) < 2:
+            return (np.nan, np.nan)
+        
+        try:
+            coeffs = np.polyfit(x, y, 1)
+            return coeffs
+        except:
+            return (np.nan, np.nan)
+    new_df[['centerline_slopes', 'centerline_intercepts']] = df.apply(linear_fit, args=(center_bodyparts_x, center_bodyparts_y), axis=1, result_type='expand')
+    
+    # adds distances between bps and centerline to new_df
+    new_df['dist_HL2centerline'] = point2line_dist(new_df['centerline_slopes'], new_df['centerline_intercepts'], df['paw_HL_x'].values, df['paw_HL_y'].values)
+    new_df['dist_HR2centerline'] = point2line_dist(new_df['centerline_slopes'], new_df['centerline_intercepts'], df['paw_HR_x'].values, df['paw_HR_y'].values)
+    new_df['dist_VL2centerline'] = point2line_dist(new_df['centerline_slopes'], new_df['centerline_intercepts'], df['paw_VL_x'].values, df['paw_VL_y'].values)
+    new_df['dist_VR2centerline'] = point2line_dist(new_df['centerline_slopes'], new_df['centerline_intercepts'], df['paw_VR_x'].values, df['paw_VR_y'].values)
+    
+    # add df_center to df
+    df = fuse_dfs(df, new_df)
+
+    return df
+
+def static_feet(df, interval_compared_s=0.1, max_paw_movement_mm=10, min_static_duration_s=0.05):
     # get list of start- and stop-frames, where paws are static and df with only the mean paw position, rest is nan
+    # interval_compared_s: because of DLC juggling, dont compare next frame but every x seconds
+    # max_paw_movement_mm: between your interval, what movement is allowed to be considered static
+    # min_static_duration_s: how long must the static period last to be considered static paw
+    # according to just looking at csv files, these settings make sense: 0.1, 10, 0.05
+    print('static_feet')
+
+    frames_compared = interval_compared_s * fps
+    min_frame_nb = min_static_duration_s * fps
+
     # define paws
-    paws = ['paw_VL', 'paw_VR', 'paw_HL', 'paw_HR']
     paws_coor = [f'{paw}_x' for paw in paws] + [f'{paw}_y' for paw in paws]
 
     # calculate the difference between the k frame and the k-x frame
     df_feet = df[paws_coor].copy()
-    paws_diff = abs(df_feet.diff(periods=1, axis='rows'))   # periods=x
+
+    
+    paws_diff = abs(df_feet.diff(periods=frames_compared, axis='rows'))
 
 
     for paw in paws:
         x, y = f'{paw}_x', f'{paw}_y'
         
         # check in which frames the vector magnitude is below x
-        vector_lengths = np.sqrt(paws_diff[x]**2 + paws_diff[y]**2)
-        paw_is_static = vector_lengths <= min_paw_movement
-        static_paw_timestamps = timestamps_onsets(paw_is_static, min_static_frame_nb, onset_cond=True)
+        vector_lengths_mm = np.sqrt(paws_diff[x]**2 + paws_diff[y]**2) / px_per_mm
+        paw_is_static = vector_lengths_mm <= max_paw_movement_mm
+        static_paw_timestamps = timestamps_onsets(paw_is_static, min_frame_nb, onset_cond=True)
     
         # creating a mask to change all values outside of timestamp-rows to nan, so that only static paw values exist
         mask = np.ones(len(df_feet), dtype=bool)
@@ -254,6 +232,7 @@ def static_feet(df, min_paw_movement, min_static_frame_nb):
             for coordinate in [x, y]:
                 step_mean = df_feet.loc[start:end, coordinate].mean()
                 df_feet.loc[start:end, coordinate] = step_mean
+
     
     # add prefix to column names and add df_feet to df
     df_feet = df_feet.add_prefix('static_')
@@ -261,10 +240,45 @@ def static_feet(df, min_paw_movement, min_static_frame_nb):
 
     return df
 
+def catwalk_regress(x, y, rvalue_threshold=0.9, duration_threshold_s=0.8, dist_threshold_mm=80):
+    # take 2 points and create the best-fitting linear regression line and add another point after another
+    # if R value is below rvalue_threshold, continue with appending frames
+    # if R value exceeds rvalue_threshold and straight_segment above duration_threshold, consider straight segment
+    print('catwalk_regress')
 
-# get list of start- and stop-frames and new dataframe, where the animal is moving straight according to df_center
-def catwalk(df, min_vector_length, straight_threshold, min_catwalk_length):
+    frames_threshold = duration_threshold_s * fps
+    segments = []
+    start_idx = 0
+    end_idx = 2
 
+    while end_idx <= len(x):
+        # Fit a line to the points
+        slope, intercept, r_value, p_value, std_err = linregress(x[start_idx:end_idx], y[start_idx:end_idx])
+
+        # Check if R-squared value exceeds the threshold
+        if r_value**2 >= rvalue_threshold:
+            end_idx += 1
+
+        elif r_value**2 < rvalue_threshold:
+            segment_dist = euclidian_dist(x[start_idx], y[start_idx], x[end_idx], y[end_idx])
+
+            if end_idx - start_idx >= frames_threshold and segment_dist >= dist_threshold_mm:
+                segments.append((start_idx, end_idx - 1))
+                start_idx = end_idx
+                end_idx += 2
+            else:
+                start_idx = end_idx
+                end_idx += 2
+
+    # If the last segment continues till the end of the series
+    if end_idx-1 == len(x) and end_idx - start_idx >= frames_threshold:
+        segments.append((start_idx, end_idx-1))
+
+    return segments
+
+def catwalk_angle(df, min_vector_length, straight_threshold, min_catwalk_length):
+    # get list of start- and stop-frames and new dataframe, where the animal is moving straight according to df_center
+    
     # calculate the distance (px) between the k frame and the k-x frame
     center_diff_x = df['center_x_shifted'] - df['center_x']
     center_diff_y = df['center_y_shifted'] - df['center_y']
@@ -304,9 +318,6 @@ def catwalk(df, min_vector_length, straight_threshold, min_catwalk_length):
 
     return df, catwalk_timestamps
 
-
-
-# (list of [start, stop],   df,     special_bodyparts=['pos', 'feet', 'raw_feet'],      bodypart=[e.g. 'snout', 'mouth'],   title of plot)
 def plot_bodyparts(timewindow, df, spec_bodyparts, bodyparts, title):
 
     for start, end in timewindow:
@@ -319,9 +330,9 @@ def plot_bodyparts(timewindow, df, spec_bodyparts, bodyparts, title):
             # plot animal center via removing the nan values
             x = rows2plot['center_x'][~np.isnan(rows2plot['center_x'])]
             y = rows2plot['center_y'][~np.isnan(rows2plot['center_y'])]
-            plt.plot(x, y, label=f'{start}_center')#, c='grey')
+            plt.plot(x, y, label=f'{start/fps}_center_{end/fps}')#, c='grey')
         
-        if 'feet' in spec_bodyparts:
+        if 'static_feet' in spec_bodyparts:
             # plot static feet
             paws = ['paw_VL', 'paw_VR', 'paw_HL', 'paw_HR']
             for paw in paws:
@@ -347,46 +358,9 @@ def plot_bodyparts(timewindow, df, spec_bodyparts, bodyparts, title):
     plt.show()
 
 
-# CLEAN the df into our format, add CENTER OF ANIMAL to df, add STATIC PAWS to df
-frames_shifted = 10
-main_df = cleaning_raw_df(main_df)
-main_df = add_basic_columns_to_df(main_df, frames_shifted, px_per_mm)
-main_df = static_feet(main_df, 5, 5)
-
-
-
-#%% HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
-# DO STUFF
-
-
-min_vector_lengh = 0.6
-straight_threshold = 0.8
-min_catwalk_length = 50
-
-
-
-# get timestamps of CATWALK
-main_df, catwalk_timestamps = catwalk(main_df, min_vector_lengh, straight_threshold, min_catwalk_length)
-
-
-
-# PLOT
-# (list of [start, stop],   df,     special_bodyparts=['center', 'feet', 'raw_feet'],      bodypart=[e.g. 'snout', 'mouth'],   title of plot)
-plot_bodyparts(catwalk_timestamps, main_df, ['center'], [], 'straight, fast and long Catwalks (animal center)')
-
-
-#%% HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
-# StaticFeet_2_Midline_distance
-
-# now, lets focus on one static_paw first: 
-    # X Whenever there is a static_paw frame_window, take the coords of the animal_center that are in the static_paw frames
-    # X If there are less than 3 frames with animal_center coordinates in the static_paw frame_window, take the 3 animal_center coords closest to frame_window
-    # O create a best-fitting linear regression onto the >=3 animal_center coords
-    # O calculate the closest distance/perpendicular of static_paw to regression line and save in list
-
-
-# returns the index of the next float number while skipping NaNs (in either direction)
+# unused functions
 def find_next_float_number(df, column, start_row, dir_higher=True):
+    # returns the index of the next float number while skipping NaNs (in either direction)
     column_number = df.columns.get_loc(column)
     
     # check the next float value towards higher rows
@@ -409,8 +383,8 @@ def find_next_float_number(df, column, start_row, dir_higher=True):
             row_number -= 1
         return None
 
-# get index_list with >= 1 index values and add indices with column_floats above & below
 def add_higherlower_float_row(df, index_list, column):
+    # get index_list with >= 1 index values and add indices with column_floats above & below
 
     low_row = df.index.get_loc(index_list[0])
     lower_row = find_next_float_number(df, column, low_row, dir_higher=False)
@@ -423,9 +397,8 @@ def add_higherlower_float_row(df, index_list, column):
 
     return index_list
 
-
-# get distance from static paw to midline
 def staticpaw2midline_dist(df, static_window, midline):
+    # get distance from static paw to midline
 
     # get all 'pos' float values (not nan) in the frame_window ad add index to list
     pos_in_static = df.loc[static_window[0] : static_window[1], f'{midline}_x'].copy().dropna()
@@ -443,18 +416,83 @@ def staticpaw2midline_dist(df, static_window, midline):
     print(f'relevant_pos_frames: {pos_in_static_idx}')
 
 
+# collect data functions
+def getdata_paw2centerline(df, timewindows):
+    paw2line_info = ['dist_VL2centerline', 'dist_VR2centerline', 'dist_HL2centerline','dist_HR2centerline']
 
-# walk_window = catwalk_timestamps[0]
-# print(f'walk_window: {walk_window}')
+    paw2line_data = []
+    for paw in paw2line_info:
+        this_paw = pd.concat([df.loc[start : end, paw] for start, end in timewindows]).tolist()
+        this_paw = [x for x in this_paw if ~np.isnan(x)]
+        paw2line_data.append(this_paw)
 
-# # get a frame_window of all static_paws
-# staticpaw_in_move = main_df.loc[walk_window[0] : walk_window[1], 'static_paw_VL_x']
-# static_window = timestamps_onsets(staticpaw_in_move, 1, onset_cond=float)[0]
-# print(f'static_paw_window: {static_window}')
+    data_mean = [np.mean(paw) for paw in paw2line_data]
+    data_std = [np.std(paw) for paw in paw2line_data]
+    data_n = [len(paw) for paw in paw2line_data]
 
-# staticpaw2midline_dist(main_df, static_window, 'pos')
-
+    return data_mean, data_std, data_n
 
 
 
-# %%
+
+#%% HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
+# DO STUFF
+
+file_list = get_files(path)
+data_mean, data_std, data_n = [], [], []
+
+
+for file in file_list:
+    print(f'\n{file}')
+    main_df = pd.read_csv(file, header=None, low_memory=False)
+    main_df = cleaning_raw_df(main_df)
+    main_df = add_basic_columns_to_df(main_df)
+    main_df = static_feet(main_df)
+
+    catwalk_segments = catwalk_regress(main_df['center_x'], main_df['center_y'])
+
+    mean, std, n = getdata_paw2centerline(main_df, catwalk_segments)
+
+    data_mean.append(mean)
+    data_std.append(std)
+    data_n.append(n)
+
+print(data_mean)
+print(data_std)
+print(data_n)
+
+
+
+# PLOT
+# (list of [start, stop], df, special_bodyparts=['center', 'static_feet', 'raw_feet'], bodypart=[e.g. 'snout', 'mouth'], title of plot)
+#plot_bodyparts(catwalk_segments, main_df, ['center'], [], 'straight, fast and long Catwalks (animal center)')
+
+
+
+
+
+
+#%%
+# STATISTICS
+
+# def add_text_to_bars(x, txt):
+#     for i in range(len(x)):
+#         plt.text(i, 0, f'n={txt[i]}', ha='center', size='small')
+
+
+# plt.bar(paw2line_info_short, data_mean, width=0.5)
+# plt.errorbar(paw2line_info_short, data_mean, yerr=data_std, fmt="o", color="r")
+
+
+# add_text_to_bars(paw2line_info_short, data_n)
+
+
+
+# plt.xlabel('paws')
+# plt.ylabel('distance [mm]')
+# plt.title('dist_paw2midline')
+# plt.show()
+
+
+
+
