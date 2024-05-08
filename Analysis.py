@@ -10,8 +10,8 @@ from matplotlib import pyplot as plt
 from scipy.stats import linregress
 import os
      
-path = 'C:\\Users\\landgrafn\\Desktop\\2m_analysis'
-common_name = '2m.csv'
+path = 'C:\\Users\\landgrafn\\Desktop\\2m_analysis\\'
+common_name = '2m'
 
 x_pixel, y_pixel = 570, 570
 arena_length = 400          # in mm
@@ -32,7 +32,7 @@ colors = ['b', 'g', 'r', 'c', 'm', 'y']
 
 def get_files(path):
     # get files
-    files = [file for file in os.listdir(path) 
+    files = [path+file for file in os.listdir(path) 
                 if os.path.isfile(os.path.join(path, file)) and
                 common_name in file]
     print(f'{len(files)} files found\n')
@@ -164,6 +164,8 @@ def add_basic_columns_to_df(df, duration_shifted_s=0.1):
     new_df['dist_L_paws'] = euclidian_dist(df['paw_HL_x'].values, df['paw_HL_y'].values, df['paw_VL_x'].values, df['paw_VL_y'].values)
     new_df['dist_R_paws'] = euclidian_dist(df['paw_HR_x'].values, df['paw_HR_y'].values, df['paw_VR_x'].values, df['paw_VR_y'].values)
     
+    new_df['dist_center_shifted'] = euclidian_dist(new_df['center_x'].values, new_df['center_y'].values, new_df['center_x_shifted'].values, new_df['center_y_shifted'].values)
+
     # takes bps that would represent an intrinsic centerline, calculates linear regression line for each row and adds columns for slope and intercept
     # takes nan if less than 2 bps without nan
     def linear_fit(row, x_headers, y_headers):
@@ -418,6 +420,8 @@ def staticpaw2midline_dist(df, static_window, midline):
 
 # collect data functions
 def getdata_paw2centerline(df, timewindows):
+    # collects the distances from moving paws to the intrinsic centerline in each frame and returns the means etc for each paw
+
     paw2line_info = ['dist_VL2centerline', 'dist_VR2centerline', 'dist_HL2centerline','dist_HR2centerline']
 
     paw2line_data = []
@@ -426,8 +430,8 @@ def getdata_paw2centerline(df, timewindows):
         this_paw = [x for x in this_paw if ~np.isnan(x)]
         paw2line_data.append(this_paw)
 
-    data_mean = [np.mean(paw) for paw in paw2line_data]
-    data_std = [np.std(paw) for paw in paw2line_data]
+    data_mean = [round(np.mean(paw), 3) for paw in paw2line_data]
+    data_std = [round(np.std(paw), 3) for paw in paw2line_data]
     data_n = [len(paw) for paw in paw2line_data]
 
     return data_mean, data_std, data_n
@@ -439,7 +443,11 @@ def getdata_paw2centerline(df, timewindows):
 # DO STUFF
 
 file_list = get_files(path)
-data_mean, data_std, data_n = [], [], []
+print(file_list)
+
+paw2centerline_mean, paw2centerline_std, paw2centerline_n = [], [], []
+travelled_distances = []
+
 
 
 for file in file_list:
@@ -451,15 +459,27 @@ for file in file_list:
 
     catwalk_segments = catwalk_regress(main_df['center_x'], main_df['center_y'])
 
+    # paw2centerline
     mean, std, n = getdata_paw2centerline(main_df, catwalk_segments)
+    paw2centerline_mean.append(mean)
+    paw2centerline_std.append(std)
+    paw2centerline_n.append(n)
 
-    data_mean.append(mean)
-    data_std.append(std)
-    data_n.append(n)
+    # total distance travelled
+    travelled_distances.append(round(main_df['dist_center_shifted'].sum(), 3))
 
-print(data_mean)
-print(data_std)
-print(data_n)
+
+    break
+
+
+
+def output_data():
+    with open(f'{path}output.txt', 'a') as f:
+        f.write(f'common_name: {common_name}\n'
+                f'paw2centerline_mean (VL, VR, HL, HR): {paw2centerline_mean}\n'
+                f'paw2centerline_std (VL, VR, HL, HR): {paw2centerline_std}\n'
+                f'paw2centerline_n (VL, VR, HL, HR): {paw2centerline_n}\n'
+                f'total_distances_travelled: {travelled_distances}\n\n')
 
 
 
@@ -469,6 +489,9 @@ print(data_n)
 
 
 
+
+
+#%%
 
 
 
