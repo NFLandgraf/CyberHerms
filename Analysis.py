@@ -490,7 +490,34 @@ def getdata_staticpaw2centerline(df, timewindows, data_lists=None):
     data_std = [round(np.std(paw), 3) for paw in staticpaw2centerline_data]
     data_n = [len(paw) for paw in staticpaw2centerline_data]
 
-    return data_mean, data_std, data_n
+    # now you want to directly store mean,std,n in a list, which is passed to the function as a dic containing the three lists
+    if data_lists is not None:
+        data_lists['mean'].append(data_mean)
+        data_lists['std'].append(data_std)
+        data_lists['n'].append(data_n)
+    else:
+        return data_mean, data_std, data_n
+
+def get_data(file):
+    # do the basic preparations
+    main_df = pd.read_csv(file, header=None, low_memory=False)
+    main_df = cleaning_raw_df(main_df)
+    main_df = add_basic_columns_to_df(main_df)
+    main_df = static_feet(main_df)
+    moving_segments = animal_moving(main_df)
+    catwalk_segments = catwalk_regress(main_df)
+
+    # get the data
+    total_travelled_distances.append(round(main_df['dist_center_shifted'].sum(), 3))
+    avrg_moving_speedmov.append(round(np.mean(main_df.loc[moving_segments, 'dist_center_shifted'] * fps), 3))   # in mm/s
+
+    # analyze the moving segments
+    getdata_paw2centerline(main_df, moving_segments, data_lists=paw2centerlinemov)
+    getdata_staticpaw2centerline(main_df, moving_segments, data_lists=staticpaw2centerlinemov)
+
+    # analyze the catwalk segments
+    getdata_paw2centerline(main_df, catwalk_segments, data_lists=paw2centerlinecat)
+    getdata_staticpaw2centerline(main_df, catwalk_segments, data_lists=staticpaw2centerlinecat)
 
 
 
@@ -524,10 +551,6 @@ def output_data():
 
 #%% HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 # DO STUFF
-
-file_list = get_files(path)
-print(file_list)
-
 # define the respective lists and collect them in a dictionary for easy use later on
 paw2centerlinemov_mean, paw2centerlinemov_std, paw2centerlinemov_n = [], [], []
 paw2centerlinemov = {'mean': paw2centerlinemov_mean, 'std': paw2centerlinemov_std, 'n': paw2centerlinemov_n}
@@ -543,40 +566,13 @@ total_travelled_distances = []
 avrg_moving_speedmov = []
 
 
-# ideas:
-# total static paw intervals during catwalk (all paws)
-# 
+
+file_list = get_files(path)
+print(file_list)
 
 for file in file_list:
     print(f'\n{file}')
-
-    # do the basic preparations
-    main_df = pd.read_csv(file, header=None, low_memory=False)
-    main_df = cleaning_raw_df(main_df)
-    main_df = add_basic_columns_to_df(main_df)
-    main_df = static_feet(main_df)
-    moving_segments = animal_moving(main_df)
-    catwalk_segments = catwalk_regress(main_df)
-
-    # get the data
-    total_travelled_distances.append(round(main_df['dist_center_shifted'].sum(), 3))
-    avrg_moving_speedmov.append(round(np.mean(main_df.loc[moving_segments, 'dist_center_shifted'] * fps), 3))   # in mm/s
-
-    # analyze the moving segments
-    getdata_paw2centerline(main_df, moving_segments, data_lists=paw2centerlinemov)
-    getdata_staticpaw2centerline(main_df, moving_segments, data_lists=staticpaw2centerlinemov)
-
-    # analyze the catwalk segments
-    getdata_paw2centerline(main_df, catwalk_segments, data_lists=paw2centerlinecat)
-    getdata_staticpaw2centerline(main_df, catwalk_segments, data_lists=staticpaw2centerlinecat)
-
-    
-    
-
-
-    break
-
-
+    get_data(file)
 
 output_data()
 
@@ -591,12 +587,6 @@ output_data()
 
 #%%
 
-def a(liste):
-    liste.append(3)
-
-b_mean = []
-a(b)
-print(b_mean)
 
 #%%
 # STATISTICS
