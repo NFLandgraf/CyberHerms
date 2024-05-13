@@ -10,8 +10,8 @@ from matplotlib import pyplot as plt
 from scipy.stats import linregress
 import os
      
-path = 'C:\\Users\\landgrafn\\Desktop\\2m_analysis\\'
-common_name = '2m'
+path = 'data\\'
+common_name = '2.csv'
 
 x_pixel, y_pixel = 570, 570
 arena_length = 400          # in mm
@@ -378,6 +378,14 @@ def plot_bodyparts(timewindow, df, spec_bodyparts, bodyparts, title):
     plt.title(title)
     plt.show()
 
+def violinplot(file, data, labels):
+    for i, paw in enumerate(data):
+        plt.violinplot(paw, labels[i])
+
+    plt.ylabel('staticpaw2centerline distance [mm]')
+    plt.title('staticpaw2centerline_' + file)
+    plt.show
+
 
 # unused functions
 def find_next_float_number(df, column, start_row, dir_higher=True):
@@ -438,20 +446,23 @@ def staticpaw2midline_dist(df, static_window, midline):
 
 
 # collect data functions
-def getdata_paw2centerline(df, timewindows, data_lists=None):
+def getdata_paw2centerline(file, df, timewindows, data_lists=None):
     # collects the distances from moving paws to the intrinsic centerline in each frame and returns the means etc for each paw
 
-    paw2line_info = ['dist_VL2centerline', 'dist_VR2centerline', 'dist_HL2centerline','dist_HR2centerline']
+    paw2centerline_info = ['dist_VL2centerline', 'dist_VR2centerline', 'dist_HL2centerline','dist_HR2centerline']
 
-    paw2line_data = []
-    for paw in paw2line_info:
+    paw2centerline_data = []
+    for paw in paw2centerline_info:
         this_paw = pd.concat([df.loc[start : end, paw] for start, end in timewindows]).tolist()
         this_paw = [x for x in this_paw if ~np.isnan(x)]
-        paw2line_data.append(this_paw)
+        paw2centerline_data.append(this_paw)
 
-    data_mean = [round(np.mean(paw), 3) for paw in paw2line_data]
-    data_std = [round(np.std(paw), 3) for paw in paw2line_data]
-    data_n = [len(paw) for paw in paw2line_data]
+    # quickly plot
+    violinplot(file, paw2centerline_data, paws)
+
+    data_mean = [round(np.mean(paw), 3) for paw in paw2centerline_data]
+    data_std = [round(np.std(paw), 3) for paw in paw2centerline_data]
+    data_n = [len(paw) for paw in paw2centerline_data]
 
     # now you want to directly store mean,std,n in a list, which is passed to the function as a dic containing the three lists
     if data_lists is not None:
@@ -461,7 +472,7 @@ def getdata_paw2centerline(df, timewindows, data_lists=None):
     else:
         return data_mean, data_std, data_n
 
-def getdata_staticpaw2centerline(df, timewindows, data_lists=None):
+def getdata_staticpaw2centerline(file, df, timewindows, data_lists=None):
     # for each window, calculate the distance between each staticpaw and the centerline in the frame of the first staticpaw data
 
     static_paws = ['static_paw_VL', 'static_paw_VR', 'static_paw_HL', 'static_paw_HR']
@@ -486,6 +497,9 @@ def getdata_staticpaw2centerline(df, timewindows, data_lists=None):
                     
                     staticpaw2centerline_data[i].append(staticpaw2centerline)
 
+    # quickly plot
+    violinplot(file, staticpaw2centerline_data, paws)
+
     data_mean = [round(np.mean(paw), 3) for paw in staticpaw2centerline_data]
     data_std = [round(np.std(paw), 3) for paw in staticpaw2centerline_data]
     data_n = [len(paw) for paw in staticpaw2centerline_data]
@@ -504,7 +518,13 @@ def get_data(file):
     main_df = cleaning_raw_df(main_df)
     main_df = add_basic_columns_to_df(main_df)
     main_df = static_feet(main_df)
+
+    # save dfs
+    main_df.to_csv(file + 'pandasedit.csv', index=True)  # To save without the index
+    print('saved!')
+
     moving_segments = animal_moving(main_df)
+    # print(moving_segments)
     catwalk_segments = catwalk_regress(main_df)
 
     # get the data
@@ -512,12 +532,12 @@ def get_data(file):
     avrg_moving_speedmov.append(round(np.mean(main_df.loc[moving_segments, 'dist_center_shifted'] * fps), 3))   # in mm/s
 
     # analyze the moving segments
-    getdata_paw2centerline(main_df, moving_segments, data_lists=paw2centerlinemov)
-    getdata_staticpaw2centerline(main_df, moving_segments, data_lists=staticpaw2centerlinemov)
+    getdata_paw2centerline(file, main_df, moving_segments, data_lists=paw2centerlinemov)
+    getdata_staticpaw2centerline(file, main_df, moving_segments, data_lists=staticpaw2centerlinemov)
 
     # analyze the catwalk segments
-    getdata_paw2centerline(main_df, catwalk_segments, data_lists=paw2centerlinecat)
-    getdata_staticpaw2centerline(main_df, catwalk_segments, data_lists=staticpaw2centerlinecat)
+    getdata_paw2centerline(file, main_df, catwalk_segments, data_lists=paw2centerlinecat)
+    getdata_staticpaw2centerline(file, main_df, catwalk_segments, data_lists=staticpaw2centerlinecat)
 
 
 
@@ -574,6 +594,8 @@ for file in file_list:
     print(f'\n{file}')
     get_data(file)
 
+    break
+
 output_data()
 
 
@@ -608,6 +630,24 @@ output_data()
 # plt.ylabel('distance [mm]')
 # plt.title('dist_paw2midline')
 # plt.show()
+
+
+
+
+
+#%%
+
+
+
+
+# violin plots
+y_values = []
+plt.violinplot(y_values)
+
+plt.show
+
+
+
 
 
 
