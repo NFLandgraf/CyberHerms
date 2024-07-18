@@ -8,10 +8,12 @@ import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.stats import linregress
+from scipy.signal import savgol_filter
 import os
+
      
-path = 'data\\'
-common_name = '2.csv'
+path = 'C:\\Users\\landgrafn\\Desktop\\3m\\'
+common_name = ''
 
 x_pixel, y_pixel = 570, 570
 arena_length = 400          # in mm
@@ -20,7 +22,7 @@ fps = 100
 duration_shifted_s = 0.1  # definition for important thing
 
 all_bodyparts = ['snout', 'mouth', 'paw_VL','paw_VR', 'middle', 'paw_HL', 'paw_HR','anus', 'tail_start', 'tail_middle', 'tail_end']
-center_bodyparts = ['middle', 'anus', 'tail_start']
+center_bodyparts = ['middle']
 paws = ['paw_VL', 'paw_VR', 'paw_HL', 'paw_HR']
 colors = ['b', 'g', 'r', 'c', 'm', 'y']
 
@@ -40,6 +42,7 @@ def get_files(path):
     return files
 
 def euclidian_dist(point1x, point1y, point2x, point2y):
+
     # calculates the euclidian distance between 2 bps in mm
     distance_mm = (np.sqrt((point1x - point2x) ** 2 + (point1y - point2y) ** 2)) / px_per_mm
     
@@ -110,7 +113,7 @@ def timestamps_onsets(series, min_duration_s, onset_cond=float):
 def cleaning_raw_df(df, nan_threshold=0.9):
     # CLEAN UP raw data frame, nan if likelihood < x, ints&floats insead of strings
     # combines the string of the two rows to create new header
-    print('cleaning_raw_df')
+    print('1. cleaning_raw_df')
 
     new_columns = [f"{col[0]}_{col[1]}" for col in zip(df.iloc[1], df.iloc[2])]     # df.iloc[0] takes all values of first row
     df.columns = new_columns
@@ -137,13 +140,14 @@ def cleaning_raw_df(df, nan_threshold=0.9):
         df = df.drop(labels=f'{bodypart}_likelihood', axis="columns")
     
     # add a gaussian filter over the df to reduce outlayers
-    df = df.rolling(window=100, win_type='gaussian', min_periods=1, center=True).mean(std=1)
+    #df = df.rolling(window=100, win_type='gaussian', min_periods=1, center=True).mean(std=1)
+    #df = df[500:750]
 
     return df
 
 def add_basic_columns_to_df(df):
     # calculating relatively simple things to add to df
-    print('add_basic_columns_to_df')
+    print('2. add_basic_columns_to_df')
 
     frames_shifted = int(duration_shifted_s * fps)
     new_df = pd.DataFrame()
@@ -152,10 +156,14 @@ def add_basic_columns_to_df(df):
     center_bodyparts_y = [f'{bodypart}_y' for bodypart in center_bodyparts]
     
     # create time series for center that is represented by the mean of stable bodyparts
-    # choose bodyparts that are always tracked
+    # choose bodyparts that are always tracked and gaussian filter it
     new_df['center_x'] = df[center_bodyparts_x].mean(axis="columns")
     new_df['center_y'] = df[center_bodyparts_y].mean(axis="columns")
-
+    new_df['center_x_avrg'] = new_df['center_x'].rolling(window=34).mean()
+    new_df['center_y_avrg'] = new_df['center_y'].rolling(window=34).mean()
+    new_df['center_x_smooth'] = savgol_filter(new_df['center_x'], 11, 2)    # window_length, polyorder
+    new_df['center_y_smooth'] = savgol_filter(new_df['center_y'], 11, 2)
+    
     # add shifted center columns to df
     new_df['center_x_shifted'] = new_df['center_x'].shift(periods=frames_shifted)
     new_df['center_y_shifted'] = new_df['center_y'].shift(periods=frames_shifted)
@@ -203,7 +211,7 @@ def static_feet(df, interval_compared_s=0.1, max_paw_movement_mm=10, min_static_
     # max_paw_movement_mm: between your interval, what movement is allowed to be considered static
     # min_static_duration_s: how long must the static period last to be considered static paw
     # according to just looking at csv files, these settings make sense: 0.1, 10, 0.05
-    print('static_feet')
+    print('3. static_feet')
 
     frames_compared = interval_compared_s * fps
     min_frame_nb = min_static_duration_s * fps
@@ -247,23 +255,29 @@ def static_feet(df, interval_compared_s=0.1, max_paw_movement_mm=10, min_static_
 
 def animal_moving(df, min_speed=10, min_moving_duration_s=0.5):
     # min_speed is in mm/s, min_moving_duration is in s  !!!depends on duration_shifted_s, which should be 0.1s!!!
+    print('4. animal_moving')
     nec_dist_mm = duration_shifted_s * min_speed
     
     animalmoving = df['dist_center_shifted'] >= nec_dist_mm
+    df['animalmoving'] = animalmoving
 
     # get True on- and offset
     animalmoving_timestamps = timestamps_onsets(animalmoving, min_moving_duration_s, onset_cond=True)
 
-    return animalmoving_timestamps
+    print(animalmoving_timestamps)
+    return df, animalmoving_timestamps
 
-def catwalk_regress(df, rvalue_threshold=0.9, duration_threshold_s=0.8, dist_threshold_mm=80):
-    # !!!does not check that animal is actually moving!!!
-    # take 2 points and create the best-fitting linear regression line and add another point after another
-    # if R value is below rvalue_threshold, continue with appending frames
-    # if R value exceeds rvalue_threshold and straight_segment above duration_threshold, consider straight segment
-    print('catwalk_regress')
-
-    # catwalk segents are calculated upon center coordinates
+def catwalk_regress(df, rvalue_threshold=0.75, duration_threshold_s=0.5, dist_threshold_mm=100):
+    print('5. catwalk_regress')
+    '''
+    Take 2 points and create the best-fitting linear regression line, then add one point after another
+    After each added point, calculate R_value, if now
+        - R_value is above rvalue_threshold AND animalmoving=True for all the resp. frames, continue adding points
+        - R_value is below rvalue_threshold, consider that the straight segment is over but only add it to list of straight segments if
+          duration is above duration_threshold AND distance is above dist_threshold
+    '''
+    
+    # catwalk segments are calculated upon center coordinates
     x = df['center_x']
     y = df['center_y']
 
@@ -272,19 +286,24 @@ def catwalk_regress(df, rvalue_threshold=0.9, duration_threshold_s=0.8, dist_thr
     start_idx = 0
     end_idx = 2
 
-    while end_idx <= len(x):
+    while end_idx <= len(x)-1:
         # Fit a line to the points
         slope, intercept, r_value, p_value, std_err = linregress(x[start_idx:end_idx], y[start_idx:end_idx])
+        
+        checko = df.loc[start_idx:end_idx, 'animalmoving'].all()
+        print(f'start: {start_idx}, end: {end_idx}, r: {r_value**2}, {checko}')
 
-        # Check if R-squared value exceeds the threshold
-        if r_value**2 >= rvalue_threshold:
+        # Check if R-squared value above threshold and animal moving
+        if r_value**2 >= rvalue_threshold and df.loc[start_idx:end_idx, 'animalmoving'].all():
             end_idx += 1
 
-        elif r_value**2 < rvalue_threshold:
+        else:
             segment_dist = euclidian_dist(x[start_idx], y[start_idx], x[end_idx], y[end_idx])
+            print(f'STOP frames:{end_idx-start_idx}, dist:{segment_dist}')
 
             if end_idx - start_idx >= frames_threshold and segment_dist >= dist_threshold_mm:
                 segments.append((start_idx, end_idx - 1))
+
                 start_idx = end_idx
                 end_idx += 2
             else:
@@ -295,6 +314,7 @@ def catwalk_regress(df, rvalue_threshold=0.9, duration_threshold_s=0.8, dist_thr
     if end_idx-1 == len(x) and end_idx - start_idx >= frames_threshold:
         segments.append((start_idx, end_idx-1))
 
+    print(segments)
     return segments
 
 def catwalk_angle(df, min_vector_length, straight_threshold, min_catwalk_length):
@@ -351,7 +371,7 @@ def plot_bodyparts(timewindow, df, spec_bodyparts, bodyparts, title):
             # plot animal center via removing the nan values
             x = rows2plot['center_x'][~np.isnan(rows2plot['center_x'])]
             y = rows2plot['center_y'][~np.isnan(rows2plot['center_y'])]
-            plt.plot(x, y, label=f'{start/fps}_center_{end/fps}')#, c='grey')
+            plt.scatter(x, y, label=f'{start/fps}_center_{end/fps}', s=0.2)#, c='grey')
         
         if 'static_feet' in spec_bodyparts:
             # plot static feet
@@ -378,14 +398,6 @@ def plot_bodyparts(timewindow, df, spec_bodyparts, bodyparts, title):
     plt.title(title)
     plt.show()
 
-def violinplot(file, data, labels):
-    for i, paw in enumerate(data):
-        plt.violinplot(paw, labels[i])
-
-    plt.ylabel('staticpaw2centerline distance [mm]')
-    plt.title('staticpaw2centerline_' + file)
-    plt.show
-
 
 # unused functions
 def find_next_float_number(df, column, start_row, dir_higher=True):
@@ -411,7 +423,6 @@ def find_next_float_number(df, column, start_row, dir_higher=True):
                 return row_number
             row_number -= 1
         return None
-
 def add_higherlower_float_row(df, index_list, column):
     # get index_list with >= 1 index values and add indices with column_floats above & below
 
@@ -425,7 +436,6 @@ def add_higherlower_float_row(df, index_list, column):
     index_list.append(higher_row)
 
     return index_list
-
 def staticpaw2midline_dist(df, static_window, midline):
     # get distance from static paw to midline
 
@@ -446,33 +456,24 @@ def staticpaw2midline_dist(df, static_window, midline):
 
 
 # collect data functions
-def getdata_paw2centerline(file, df, timewindows, data_lists=None):
+def getdata_paw2centerline(df, timewindows):
     # collects the distances from moving paws to the intrinsic centerline in each frame and returns the means etc for each paw
 
-    paw2centerline_info = ['dist_VL2centerline', 'dist_VR2centerline', 'dist_HL2centerline','dist_HR2centerline']
+    paw2line_info = ['dist_VL2centerline', 'dist_VR2centerline', 'dist_HL2centerline','dist_HR2centerline']
 
-    paw2centerline_data = []
-    for paw in paw2centerline_info:
+    paw2line_data = []
+    for paw in paw2line_info:
         this_paw = pd.concat([df.loc[start : end, paw] for start, end in timewindows]).tolist()
         this_paw = [x for x in this_paw if ~np.isnan(x)]
-        paw2centerline_data.append(this_paw)
+        paw2line_data.append(this_paw)
 
-    # quickly plot
-    violinplot(file, paw2centerline_data, paws)
+    data_mean = [round(np.mean(paw), 3) for paw in paw2line_data]
+    data_std = [round(np.std(paw), 3) for paw in paw2line_data]
+    data_n = [len(paw) for paw in paw2line_data]
 
-    data_mean = [round(np.mean(paw), 3) for paw in paw2centerline_data]
-    data_std = [round(np.std(paw), 3) for paw in paw2centerline_data]
-    data_n = [len(paw) for paw in paw2centerline_data]
+    return data_mean, data_std, data_n
 
-    # now you want to directly store mean,std,n in a list, which is passed to the function as a dic containing the three lists
-    if data_lists is not None:
-        data_lists['mean'].append(data_mean)
-        data_lists['std'].append(data_std)
-        data_lists['n'].append(data_n)
-    else:
-        return data_mean, data_std, data_n
-
-def getdata_staticpaw2centerline(file, df, timewindows, data_lists=None):
+def getdata_staticpaw2centerline(df, timewindows):
     # for each window, calculate the distance between each staticpaw and the centerline in the frame of the first staticpaw data
 
     static_paws = ['static_paw_VL', 'static_paw_VR', 'static_paw_HL', 'static_paw_HR']
@@ -497,65 +498,17 @@ def getdata_staticpaw2centerline(file, df, timewindows, data_lists=None):
                     
                     staticpaw2centerline_data[i].append(staticpaw2centerline)
 
-    # quickly plot
-    violinplot(file, staticpaw2centerline_data, paws)
-
     data_mean = [round(np.mean(paw), 3) for paw in staticpaw2centerline_data]
     data_std = [round(np.std(paw), 3) for paw in staticpaw2centerline_data]
     data_n = [len(paw) for paw in staticpaw2centerline_data]
 
-    # now you want to directly store mean,std,n in a list, which is passed to the function as a dic containing the three lists
-    if data_lists is not None:
-        data_lists['mean'].append(data_mean)
-        data_lists['std'].append(data_std)
-        data_lists['n'].append(data_n)
-    else:
-        return data_mean, data_std, data_n
-
-def get_data(file):
-    # do the basic preparations
-    main_df = pd.read_csv(file, header=None, low_memory=False)
-    main_df = cleaning_raw_df(main_df)
-    main_df = add_basic_columns_to_df(main_df)
-    main_df = static_feet(main_df)
-
-    # save dfs
-    main_df.to_csv(file + 'pandasedit.csv', index=True)  # To save without the index
-    print('saved!')
-
-    moving_segments = animal_moving(main_df)
-    # print(moving_segments)
-    catwalk_segments = catwalk_regress(main_df)
-
-    # get the data
-    total_travelled_distances.append(round(main_df['dist_center_shifted'].sum(), 3))
-    avrg_moving_speedmov.append(round(np.mean(main_df.loc[moving_segments, 'dist_center_shifted'] * fps), 3))   # in mm/s
-
-    # analyze the moving segments
-    getdata_paw2centerline(file, main_df, moving_segments, data_lists=paw2centerlinemov)
-    getdata_staticpaw2centerline(file, main_df, moving_segments, data_lists=staticpaw2centerlinemov)
-
-    # analyze the catwalk segments
-    getdata_paw2centerline(file, main_df, catwalk_segments, data_lists=paw2centerlinecat)
-    getdata_staticpaw2centerline(file, main_df, catwalk_segments, data_lists=staticpaw2centerlinecat)
-
-
-
+    return data_mean, data_std, data_n
 
 def output_data():
     with open(f'{path}output.txt', 'a') as f:
         f.write(f'common_name: {common_name}\n'
                 
-                f'total_distances_travelled: {total_travelled_distances}\n'
-                f'avrg_moving_speedmov: {avrg_moving_speedmov}\n'
-                
-                f'paw2centerlinemov_mean [[VL, VR, HL, HR], ...]: {paw2centerlinemov_mean}\n{paw2centerlinemov_std}\n'
-                f'paw2centerlinemov_std [[VL, VR, HL, HR], ...]: {paw2centerlinemov_std}\n'
-                f'paw2centerlinemov_n [[VL, VR, HL, HR], ...]: {paw2centerlinemov_n}\n'
-
-                f'staticpaw2centerlinemov_mean [[VL, VR, HL, HR], ...]: {staticpaw2centerlinemov_mean}\n'
-                f'staticpaw2centerlinemov_std [[VL, VR, HL, HR], ...]: {staticpaw2centerlinemov_std}\n'
-                f'staticpaw2centerlinemov_n [[VL, VR, HL, HR], ...]: {staticpaw2centerlinemov_n}\n'
+                f'total_distances_travelled: {travelled_distances}\n'
 
                 f'paw2centerlinecat_mean [[VL, VR, HL, HR], ...]: {paw2centerlinecat_mean}\n'
                 f'paw2centerlinecat_std [[VL, VR, HL, HR], ...]: {paw2centerlinecat_std}\n'
@@ -566,48 +519,86 @@ def output_data():
                 f'staticpaw2centerlinecat_n [[VL, VR, HL, HR], ...]: {staticpaw2centerlinecat_n}\n'
         )
 
+
                 
-
-
-#%% HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
+#%%
 # DO STUFF
-# define the respective lists and collect them in a dictionary for easy use later on
-paw2centerlinemov_mean, paw2centerlinemov_std, paw2centerlinemov_n = [], [], []
-paw2centerlinemov = {'mean': paw2centerlinemov_mean, 'std': paw2centerlinemov_std, 'n': paw2centerlinemov_n}
-staticpaw2centerlinemov_mean, staticpaw2centerlinemov_std, staticpaw2centerlinemov_n = [], [], []
-staticpaw2centerlinemov = {'mean': staticpaw2centerlinemov_mean, 'std': staticpaw2centerlinemov_std, 'n': staticpaw2centerlinemov_n}
-
-paw2centerlinecat_mean, paw2centerlinecat_std, paw2centerlinecat_n = [], [], []
-paw2centerlinecat = {'mean': paw2centerlinecat_mean, 'std': paw2centerlinecat_std, 'n': paw2centerlinecat_n}
-staticpaw2centerlinecat_mean, staticpaw2centerlinecat_std, staticpaw2centerlinecat_n = [], [], []
-staticpaw2centerlinecat = {'mean': staticpaw2centerlinecat_mean, 'std': staticpaw2centerlinecat_std, 'n': staticpaw2centerlinecat_n}
-
-total_travelled_distances = []
-avrg_moving_speedmov = []
-
-
 
 file_list = get_files(path)
 print(file_list)
 
+paw2centerlinecat_mean, paw2centerlinecat_std, paw2centerlinecat_n = [], [], []
+staticpaw2centerlinecat_mean, staticpaw2centerlinecat_std, staticpaw2centerlinecat_n = [], [], []
+travelled_distances = []
+
+# ideas:
+# total static paw intervals during catwalk (all paws)
+# 
+
 for file in file_list:
     print(f'\n{file}')
-    get_data(file)
+    main_df = pd.read_csv(file, header=None, low_memory=False)
+    main_df = cleaning_raw_df(main_df)
+    main_df = add_basic_columns_to_df(main_df)
+    main_df = static_feet(main_df)
 
-    break
+    #main_df, moving_segments = animal_moving(main_df)
+    #catwalk_segments = catwalk_regress(main_df)
 
-output_data()
+#plot_bodyparts([[658,667]], main_df, ['center'], [], 'straight, fast and long Catwalks (animal center)')
+
+#%%
+
+
+
+plt.scatter(main_df.loc[600:700, 'center_x'], main_df.loc[600:700, 'center_y'], s=1, label='orig')
+plt.scatter(main_df.loc[600:700, 'center_x_smooth'], main_df.loc[600:700, 'center_y_smooth'], s=1, label='savgol')
+plt.scatter(main_df.loc[600:700, 'center_x_avrg'], main_df.loc[600:700, 'center_y_avrg'], s=1, label='avrg')
+
+
+plt.legend()
+plt.show()
+
+#plot_bodyparts([[601,720]], main_df, ['center'], [], 'straight, fast and long Catwalks (animal center)')
+#plot_bodyparts(catwalk_segments, main_df, ['center'], [], 'straight, fast and long Catwalks (animal center)')
+
+
+#%%
+
+# total distance travelled
+travelled_distances.append(round(main_df['dist_center_shifted'].sum(), 3))
+
+# paw2centerlinecat
+mean, std, n = getdata_paw2centerline(main_df, catwalk_segments)
+paw2centerlinecat_mean.append(mean)
+paw2centerlinecat_std.append(std)
+paw2centerlinecat_n.append(n)
+
+# staticpaw2centerline
+mean, std, n = getdata_staticpaw2centerline(main_df, catwalk_segments)
+staticpaw2centerlinecat_mean.append(mean)
+staticpaw2centerlinecat_std.append(std)
+staticpaw2centerlinecat_n.append(n)
+
+
+
+
+
+
+
 
 
 # PLOT
 # (list of [start, stop], df, special_bodyparts=['center', 'static_feet', 'raw_feet'], bodypart=[e.g. 'snout', 'mouth'], title of plot)
-#plot_bodyparts(catwalk_segments, main_df, ['center'], [], 'straight, fast and long Catwalks (animal center)')
+plot_bodyparts(catwalk_segments, main_df, ['center'], [], 'straight, fast and long Catwalks (animal center)')
+plot_bodyparts([0,200], main_df, ['center'], [], 'straight, fast and long Catwalks (animal center)')
 
 
-
+output_data()
 
 
 #%%
+
 
 
 #%%
@@ -634,21 +625,4 @@ output_data()
 
 
 
-
-#%%
-
-
-
-
-# violin plots
-y_values = []
-plt.violinplot(y_values)
-
-plt.show
-
-
-
-
-
-
-
+print(main_df.loc[25:30, 'animalmoving'].all())
