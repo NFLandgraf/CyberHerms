@@ -1,0 +1,9 @@
+
+common_name: 3m_292_trim
+total_distances_travelled: [5290.365]
+paw2centerlinecat_mean [[VL, VR, HL, HR], ...]: [[7.049, 8.419, 10.379, 14.333]]
+paw2centerlinecat_std [[VL, VR, HL, HR], ...]: [[3.427, 4.965, 1.024, 1.59]]
+paw2centerlinecat_n [[VL, VR, HL, HR], ...]: [[116, 116, 116, 116]]
+staticpaw2centerlinecat_mean [[VL, VR, HL, HR], ...]: [[4.275, 5.6, 9.317, 13.351]]
+staticpaw2centerlinecat_std [[VL, VR, HL, HR], ...]: [[0.842, 1.7, 0.516, 1.66]]
+staticpaw2centerlinecat_n [[VL, VR, HL, HR], ...]: [[3, 4, 2, 3]]
