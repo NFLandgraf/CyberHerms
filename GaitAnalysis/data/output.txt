@@ -1,0 +1,18 @@
+
+common_name: trim
+total_distances_travelled: [5290.365]
+paw2centerlinecat_mean [[VL, VR, HL, HR], ...]: [[8.93, 8.322, 11.488, 13.706]]
+paw2centerlinecat_std [[VL, VR, HL, HR], ...]: [[5.367, 4.928, 2.081, 2.177]]
+paw2centerlinecat_n [[VL, VR, HL, HR], ...]: [[326, 328, 332, 334]]
+staticpaw2centerlinecat_mean [[VL, VR, HL, HR], ...]: [[7.76, 5.16, 10.416, 13.381]]
+staticpaw2centerlinecat_std [[VL, VR, HL, HR], ...]: [[4.263, 2.049, 1.374, 2.031]]
+staticpaw2centerlinecat_n [[VL, VR, HL, HR], ...]: [[11, 9, 6, 8]]
+
+common_name: trim
+total_distances_travelled: [5290.365]
+paw2centerlinecat_mean [[VL, VR, HL, HR], ...]: [[8.93, 8.322, 11.488, 13.706]]
+paw2centerlinecat_std [[VL, VR, HL, HR], ...]: [[5.367, 4.928, 2.081, 2.177]]
+paw2centerlinecat_n [[VL, VR, HL, HR], ...]: [[326, 328, 332, 334]]
+staticpaw2centerlinecat_mean [[VL, VR, HL, HR], ...]: [[7.76, 5.16, 10.416, 13.381]]
+staticpaw2centerlinecat_std [[VL, VR, HL, HR], ...]: [[4.263, 2.049, 1.374, 2.031]]
+staticpaw2centerlinecat_n [[VL, VR, HL, HR], ...]: [[11, 9, 6, 8]]

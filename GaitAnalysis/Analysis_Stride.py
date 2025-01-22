@@ -3,14 +3,18 @@
 import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
-from scipy.stats import linregress
+from scipy.stats import linregress, sem
 from scipy.signal import savgol_filter
 import os
 from random import randrange
+from matplotlib.animation import FuncAnimation
 
-     
-path = 'C:\\Users\\landgrafn\\NFCyber\\WalterWhities\\data\\'
-common_name = '3m'
+%matplotlib tk
+
+
+#path = 'C:\\Users\\landgrafn\\NFCyber\\WalterWhities\\data\\'
+path = 'C:\\Users\\landgrafn\\Desktop\\feet\\'
+common_name = '.csv'
 
 x_pixel, y_pixel = 570, 570
 arena_length = 400          # in mm
@@ -21,17 +25,10 @@ all_bodyparts = ['snout', 'mouth', 'paw_VL','paw_VR', 'middle', 'paw_HL', 'paw_H
 center_bodyparts = ['middle']
 centerline_bodyparts = ['tail_start', 'anus', 'middle']
 paws = ['paw_VL', 'paw_VR', 'paw_HL', 'paw_HR']
-colors = ['b', 'g', 'r', 'c', 'm', 'y']
-colors = ['r', 'c', 'm', 'y']
+colors = ['b', 'orange', 'r', 'c', 'm', 'y']
+#colors = ['r', 'c', 'm', 'y']
 
 
-
-
-
-#%% HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
-# FUNCTIONS
-
-# basic functions
 def get_files(path):
     # get files
 
@@ -41,7 +38,13 @@ def get_files(path):
     print(f'{len(files)} files found\n')
 
     return files
+file_list = get_files(path)
 
+
+#%% HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
+# FUNCTIONS
+
+# basic functions
 def euclidian_dist(point1x, point1y, point2x, point2y):
     # calculates the euclidian distance between 2 bps in mm
 
@@ -51,7 +54,6 @@ def euclidian_dist(point1x, point1y, point2x, point2y):
         print('ERROR: euclidian_dist was not working')
     
     return distance_mm
-
 def point2line_dist(slope, intercept, point_x, point_y):
     # returns the shortest distance between a line (given slope and intercept) and a xy point
 
@@ -59,7 +61,6 @@ def point2line_dist(slope, intercept, point_x, point_y):
     distance = (abs(A*point_x + B*point_y + C) / np.sqrt(A**2 + B**2))
 
     return distance
-
 def timestamps_onsets(series, min_duration_s, onset_cond=float):
     # you have a series with conditions (e.g. True/False or float/nan ->change for onset_cond!) in each row
     # return the start & stop frame of the [cond_onset, cond_offset]
@@ -104,8 +105,7 @@ def timestamps_onsets(series, min_duration_s, onset_cond=float):
     
     return timestamp_list
 
-
-# specific functions
+# standard functions
 def cleaning_raw_df(df, nan_threshold=0.3):
     # CLEAN UP raw data frame, nan if likelihood < x (nan_threshold), ints&floats insead of strings
     # combines the string of the two rows to create new header
@@ -139,7 +139,6 @@ def cleaning_raw_df(df, nan_threshold=0.3):
     df = df * mm_per_px
     
     return df
-
 def animal_moving(df, min_speed=50, min_moving_duration_s=0.5):
     # define segments where the animal is moving acc to the parameters min_speed (in mm/s) and miin_moving_duration_s (in sec)
 
@@ -160,7 +159,6 @@ def animal_moving(df, min_speed=50, min_moving_duration_s=0.5):
     moving_segments = timestamps_onsets(animalmoving, min_moving_duration_s, onset_cond=True)
 
     return df, moving_segments
-
 def paw_speed(df):
     # calculate the speed of the paws' movement by shifting the column frames into the future and calculating the resulting euclidian distance
 
@@ -178,6 +176,8 @@ def paw_speed(df):
 
     return df
 
+
+# stride functions
 def paw_speed_minmax(df, nec_speed_on=80, nec_speed_off=80):
     # goes through all paws and saves the toe-off and foot-strike as one step
     # toe-off is considered as exceeding the nec_speed_on (in mm/s), foot-strike is considered as being slower than the nec_speed_off (in mm/s)
@@ -207,7 +207,7 @@ def paw_speed_minmax(df, nec_speed_on=80, nec_speed_off=80):
                 
     return steps_dict
 
-def define_strides(df, steps_dict):
+def get_strides(df, steps_dict):
     '''
     A stride is defined by the paw_HL only. 
 
@@ -242,7 +242,7 @@ def define_strides(df, steps_dict):
     for start, end in strides:
         if df.loc[start:end, 'animalmoving'].all() == True:
             strides_in_move.append((start, end))
-    # strides = strides_in_move
+    strides = strides_in_move
 
     # discard strides where there is no toe-off and foot-strike of paw_HR
     steps_HR = steps_dict.get('paw_HR', [])
@@ -251,7 +251,7 @@ def define_strides(df, steps_dict):
         for start_HR, end_HR in steps_HR:
             if start_HL < start_HR and end_HL > end_HR:
                 strides_in_move_and_HR.append((start_HL, end_HL))
-    # strides = strides_in_move_and_HR
+    strides = strides_in_move_and_HR
     
     # discard strides when they are the first or last of a track (also optional, only use when you have enough data)
     good_strides = []
@@ -264,11 +264,11 @@ def define_strides(df, steps_dict):
         if len(segment_strides) >= 3:
             segment_strides = segment_strides[1:-1]
             good_strides.extend(segment_strides)
-    #strides = good_strides
+    strides = good_strides
 
 
     # discard strides if nose/mouth/middle/anus/tail_start coordinates during stride are nan
-    relevant_bps = ['snout', 'middle', 'anus', 'tail_start', 'paw_HR', 'paw_HL', 'paw_VL', 'paw_VR', 'tail_middle', 'tail_end']
+    relevant_bps = ['snout']#, 'middle', 'anus', 'tail_start', 'paw_HR', 'paw_HL', 'paw_VL', 'paw_VR', 'tail_middle', 'tail_end']
     very_good_strides = []
     for stride_start, stride_end in strides:
         all_clear = True
@@ -277,7 +277,7 @@ def define_strides(df, steps_dict):
                 all_clear = False
         if all_clear:
             very_good_strides.append((stride_start, stride_end))
-    # strides = very_good_strides
+    strides = very_good_strides
 
     print(f'number of accepted strides: {len(strides)}')
     return strides
@@ -380,9 +380,9 @@ def lateral_displacement(df, stride_segments, stride_vectors, bodypart, num_bins
     return lateral_displacements_norm, mean_lateral_displacements
 
 
-        
 
 
+# plotting
 def plot_bodyparts(timewindow, df, spec_bodyparts, bodyparts, title):
 
     paws = ['paw_VL', 'paw_VR', 'paw_HL', 'paw_HR']
@@ -421,7 +421,6 @@ def plot_bodyparts(timewindow, df, spec_bodyparts, bodyparts, title):
     #plt.legend()
     plt.title(title)
     plt.show()
-
 def plot_ind_pawspeeds(df, steps_dict, paws, lim):
         
     # plots paw speeds and their steps as horizontal lines
@@ -443,7 +442,6 @@ def plot_ind_pawspeeds(df, steps_dict, paws, lim):
     plt.legend()
     plt.title('Steps')
     plt.show()
-
 def plot_average_stride(output_name, norm_strides_dict, mean_strides_dict, paws):
     
     # plot the desired paws for the average stride
@@ -453,11 +451,12 @@ def plot_average_stride(output_name, norm_strides_dict, mean_strides_dict, paws)
         # calculate standard deviation for the error region of the mean plot
         stride_matrix = np.array(norm_strides_dict[paw])
         std_dev = np.nanstd(stride_matrix, axis=0)
-
+        sem_dev = (np.nanstd(stride_matrix, axis=0) / np.sqrt(len(stride_matrix)))
+    
         mean = np.array(mean_strides_dict[paw])
 
         plt.plot(x, mean, c=colors[i], linewidth=2, label=f'{paw} n={len(norm_strides_dict[paw])}')
-        plt.fill_between(x, mean-std_dev, mean+std_dev, color=colors[i], alpha=0.3)
+        plt.fill_between(x, mean-sem_dev, mean+sem_dev, color=colors[i], alpha=0.3)
 
         # individual traces
         if False == True:
@@ -466,12 +465,11 @@ def plot_average_stride(output_name, norm_strides_dict, mean_strides_dict, paws)
         
     plt.xlabel('Percent Stride')
     plt.ylabel('Paw Speed [mm/s]')
-    plt.ylim(0,800)
-    plt.title(f'Stride {output_name}')
+    #plt.ylim(0,800)
+    plt.title(f'Stride Architecture')
     plt.legend()
     plt.savefig(f'{output_name}_Stride.png')
     plt.show()
-
 def plot_displacement(output_name, lateral_displacements_norm, mean_lateral_displacements, bodypart):
 
     
@@ -480,11 +478,12 @@ def plot_displacement(output_name, lateral_displacements_norm, mean_lateral_disp
     # calculate standard deviation for the error region of the mean plot
     stride_matrix = np.array(lateral_displacements_norm)
     std_dev = np.nanstd(stride_matrix, axis=0)
+    sem_dev = (np.nanstd(stride_matrix, axis=0) / np.sqrt(len(stride_matrix)))
 
     mean = np.array(mean_lateral_displacements)
 
     plt.plot(x, mean, c='k', linewidth=2, label=f'{bodypart} n={len(lateral_displacements_norm)}')
-    plt.fill_between(x, mean-std_dev, mean+std_dev, color='k', alpha=0.3)
+    plt.fill_between(x, mean-sem_dev, mean+sem_dev, color='k', alpha=0.3)
 
     # individual traces
     if False == True:
@@ -503,34 +502,73 @@ def plot_displacement(output_name, lateral_displacements_norm, mean_lateral_disp
 
 
 
-file_list = get_files(path)
 
 for file in file_list:
     print(f'{file}')
     output_name = file.replace(path, '')
     output_name = output_name.replace('.csv', '')
     
+    # standard stuff
     main_df = pd.read_csv(file, header=None, low_memory=False)
     main_df = cleaning_raw_df(main_df)
     main_df, moving_segments = animal_moving(main_df)
     main_df = paw_speed(main_df)
 
+
     # stride stuff
     steps_dict = paw_speed_minmax(main_df)
-    stride_segments = define_strides(main_df, steps_dict)
-    norm_strides_dict, mean_strides_dict = stride_normalization(main_df, num_bins=20)
+    stride_segments = get_strides(main_df, steps_dict)
+    norm_strides_dict, mean_strides_dict = stride_normalization(main_df)
     stride_distances, stride_vectors = calc_stride_vectors(main_df, stride_segments)
-    #plot_ind_pawspeeds(main_df, steps_dict, ['paw_HL', 'paw_HR'], [stride_segments[0][0], stride_segments[0][1]])
-    plot_average_stride(output_name, norm_strides_dict, mean_strides_dict, ['paw_VL', 'paw_VR'])
+
+    print(stride_segments)
+
+
+
 
     # lateral stuff
-    for bp in ['snout', 'tail_start', 'tail_middle', 'tail_end', 'anus']:
+    for bp in ['snout']:#, 'tail_start', 'tail_middle', 'tail_end', 'anus']:
         lateral_displacements_norm, mean_lateral_displacements = lateral_displacement(main_df, stride_segments, stride_vectors, bp)
-        #plot_displacement(output_name, lateral_displacements_norm, mean_lateral_displacements, bp)
+        plot_displacement(output_name, lateral_displacements_norm, mean_lateral_displacements, bp)
 
+
+
+
+
+    # plot_ind_pawspeeds(main_df, steps_dict, ['paw_HL', 'paw_HR'], [stride_segments[0][0], stride_segments[0][1]])
+    # plot_average_stride(output_name, norm_strides_dict, mean_strides_dict, ['paw_VL', 'paw_VR', 'paw_HL', 'paw_HR'])
+
+
+
+#%%
+
+
+anim_bodyparts = ['snout', 'paw_VL','paw_VR', 'paw_HR', 'paw_HL']
+
+def animation(df, bodypart_list):
+
+    colors = ['gray', 'b', 'c', 'orange', 'r']
+    fig, ax = plt.subplots()
+    ax.set_xlim(0, 400)
+    ax.set_ylim(0, 400)
     
-# (list of [start, stop], df, special_bodyparts=['center', 'static_feet', 'raw_feet'], bodypart=[e.g. 'snout', 'mouth'], title of plot)
-    #plot_bodyparts(moving_segments[0:1], main_df, [], ['paw_HL'], f'Moving {file}')
 
+    def update(frame):
+        ax.clear()
+        ax.set_xlim(240, 330)
+        ax.set_ylim(100, 250)
 
+        for i, bp in enumerate(bodypart_list):
+            x = df[f'{bp}_x'].iloc[frame]
+            y = df[f'{bp}_y'].iloc[frame]
+            ax.scatter(x, y, color=colors[i], s=70)
+            ax.text(x+2, y, bp, fontsize=8, color=colors[i])
+        return ax
+
+    anim = FuncAnimation(fig, update, frames=np.arange(7936, 7961, 1), interval=100)
+    anim.save('continuousSineWave.mp4',  
+          writer = 'ffmpeg', fps = 10) 
+    return anim
+
+my_animation = animation(main_df, anim_bodyparts)
 

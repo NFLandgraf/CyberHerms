@@ -3,6 +3,7 @@
 # Lets keep main_df as the main DataFrame, where the index is the frame number. 
 # If we calculate sth new (e.g. animal center, static_paw), there is the function fuse_dfs() to add new columns to the df. 
 # Whenever we work on/manipulate the df, lets do this with a df.copy(), so the df is untouched
+# everything is in pixel somehow
 
 import pandas as pd
 import numpy as np
@@ -13,8 +14,8 @@ import os
 from random import randrange
 
      
-path = 'C:\\Users\\landgrafn\\NFCyber\\WalterWhities\\data\\'
-common_name = '3m'
+path = 'C:\\Users\\landgrafn\\CyberHerms\\GaitAnalysis\\data\\'
+common_name = 'trim'
 
 x_pixel, y_pixel = 570, 570
 arena_length = 400          # in mm
@@ -28,12 +29,6 @@ centerline_bodyparts = ['tail_start', 'anus', 'middle']
 paws = ['paw_VL', 'paw_VR', 'paw_HL', 'paw_HR']
 colors = ['b', 'g', 'r', 'c', 'm', 'y']
 
-
-
-#%% HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
-# FUNCTIONS
-
-# basic functions
 def get_files(path):
     # get files
     files = [path+file for file in os.listdir(path) 
@@ -42,7 +37,13 @@ def get_files(path):
     print(f'{len(files)} files found\n')
 
     return files
+file_list = get_files(path)
 
+
+#%% HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
+# FUNCTIONS
+
+# basic functions
 def euclidian_dist(point1x, point1y, point2x, point2y):
 
     try:
@@ -52,21 +53,18 @@ def euclidian_dist(point1x, point1y, point2x, point2y):
         print('ERROR: euclidian_dist was not working')
     
     return distance_mm
-
 def point2line_dist(slope, intercept, point_x, point_y):
     # returns the shortest distance between a line (given slope and intercept) and a xy point
     A, B, C = slope, -1, intercept
     distance = (abs(A*point_x + B*point_y + C) / np.sqrt(A**2 + B**2)) / px_per_mm
 
     return distance
-
 def fuse_dfs(df1, df2):
     # FUSE 2 dfs by reindexing df2 to the index of df1 (important if you have nan gaps)
     df2 = df2.reindex(df1.index)
     df1 = df1.join(df2)
 
     return df1
-
 def timestamps_onsets(series, min_duration_s, onset_cond=float):
     # you have a series with conditions (e.g. True/False or float/nan) in each row
     # return the start & stop frame of the [cond_onset, cond_offset]
@@ -118,7 +116,6 @@ def timestamps_onsets(series, min_duration_s, onset_cond=float):
 def cleaning_raw_df(df, nan_threshold=0.9):
     # CLEAN UP raw data frame, nan if likelihood < x, ints&floats insead of strings
     # combines the string of the two rows to create new header
-    #print('1. cleaning_raw_df')
 
     new_columns = [f"{col[0]}_{col[1]}" for col in zip(df.iloc[1], df.iloc[2])]     # df.iloc[0] takes all values of first row
     df.columns = new_columns
@@ -152,7 +149,6 @@ def cleaning_raw_df(df, nan_threshold=0.9):
 
 def add_basic_columns_to_df(df):
     # calculating relatively simple things to add to df
-    #print('2. add_basic_columns_to_df')
 
     frames_shifted = int(duration_shifted_s * fps)
     new_df = pd.DataFrame()
@@ -266,7 +262,6 @@ def static_feet(df, interval_compared_s=0.1, max_paw_movement_mm=10, min_static_
 
 def animal_moving(df, min_speed=10, min_moving_duration_s=0.5):
     # min_speed is in mm/s, min_moving_duration is in s  !!!depends on duration_shifted_s, which should be 0.1s!!!
-    #print('4. animal_moving')
     nec_dist_mm = duration_shifted_s * min_speed
     
     animalmoving = df['dist_center_shifted'] >= nec_dist_mm
@@ -278,7 +273,6 @@ def animal_moving(df, min_speed=10, min_moving_duration_s=0.5):
     return df, animalmoving_timestamps
 
 def catwalk_regress(df, rvalue_threshold=0.65, duration_threshold_s=0.5, dist_threshold_mm=100, frame_skip=5):
-    #print('5. catwalk_regress')
     '''
     Take 2 points and create the best-fitting linear regression line, then add one point after another
     After each added point, calculate R_value, if now
@@ -555,26 +549,23 @@ def main_analysis(file):
 
     return main_df, moving_segments, catwalk_segments
                 
-#% HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
+#%% HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH
 # DO STUFF
 
-file_list = get_files(path)
 
 paw2centerlinecat_mean, paw2centerlinecat_std, paw2centerlinecat_n = [], [], []
 staticpaw2centerlinecat_mean, staticpaw2centerlinecat_std, staticpaw2centerlinecat_n = [], [], []
 travelled_distances = []
 
-# ideas:
-# total static paw intervals during catwalk (all paws)
-# 
+
 
 for file in file_list:
     print(f'\n{file}')
     
     main_df, moving_segments, catwalk_segments = main_analysis(file)
 
-    plot_bodyparts(moving_segments, main_df, ['center'], [], f'Moving {file}')
-    plot_bodyparts(catwalk_segments, main_df, ['center'], [], f'Catwalks {file}')
+    #plot_bodyparts(moving_segments, main_df, ['center'], [], f'Moving {file}')
+    #plot_bodyparts(catwalk_segments, main_df, ['center'], [], f'Catwalks {file}')
 
     # total distance travelled
     travelled_distances.append(round(main_df['dist_center_shifted'].sum(), 3))
